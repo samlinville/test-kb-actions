@@ -1,7 +1,14 @@
-const { execSync } = require('child_process');
-const { Octokit } = require('@octokit/rest');
+import { execSync } from 'child_process';
+import { createRequire } from 'module';
 
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+const require = createRequire(import.meta.url);
+
+let Octokit;
+
+async function initOctokit() {
+  const { Octokit: OctokitClass } = await import('@octokit/rest');
+  Octokit = OctokitClass;
+}
 
 function getChangedFiles() {
   const result = execSync('git diff --name-only origin/main...HEAD')
@@ -37,7 +44,14 @@ function extractHeadingChanges(diff) {
   return headingChanges;
 }
 
-async function leaveComment(repo, prNumber, filePath, line, content) {
+async function leaveComment(
+  octokit,
+  repo,
+  prNumber,
+  filePath,
+  line,
+  content
+) {
   const [owner, repoName] = repo.split('/');
 
   // Check for existing comments
@@ -68,9 +82,7 @@ async function leaveComment(repo, prNumber, filePath, line, content) {
   const commitSha = pullRequest.head.sha;
 
   // Create a new comment with the updated format
-  const commentBody = `🤖 Beep boop! Heading change detected!
-
-This means that some anchor links pointing to this heading might be broken now.
+  const commentBody = `Beep boop! Heading change detected!
 
 Please search the nextjs/src/app/kb/_content directory for any references to the anchor link for this content, to avoid broken anchor links.`;
 
@@ -88,6 +100,9 @@ Please search the nextjs/src/app/kb/_content directory for any references to the
 }
 
 async function main() {
+  await initOctokit();
+  const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+
   const repo = process.env.GITHUB_REPOSITORY;
   const prNumber = parseInt(
     process.env.GITHUB_EVENT_PULL_REQUEST_NUMBER,
@@ -99,7 +114,14 @@ async function main() {
     const diff = getFileDiff(filePath);
     const headingChanges = extractHeadingChanges(diff);
     for (const [line, content] of headingChanges) {
-      await leaveComment(repo, prNumber, filePath, line, content);
+      await leaveComment(
+        octokit,
+        repo,
+        prNumber,
+        filePath,
+        line,
+        content
+      );
     }
   }
 }
