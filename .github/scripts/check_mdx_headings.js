@@ -113,7 +113,12 @@ async function createReviewWithComments(repo, prNumber, comments) {
       pull_number: prNumber,
       commit_id: commitSha,
       event: 'COMMENT',
-      comments: comments,
+      comments: comments.map((comment) => ({
+        path: comment.path,
+        line: comment.line,
+        side: 'RIGHT',
+        body: comment.body,
+      })),
     });
 
     console.log(`Successfully created review with ID: ${review.id}`);
@@ -163,17 +168,12 @@ async function main() {
     for (const change of headingChanges) {
       allComments.push({
         path: filePath,
-        position: change.position,
+        line: change.line,
         body: `Beep boop! Heading change detected!
 
 Please search the nextjs/src/app/kb/_content directory for any references to the anchor link for this content, to avoid broken anchor links.
 
 Changed heading: ${change.content}`,
-        line: change.line,
-        side: 'RIGHT',
-        start_line: change.line,
-        start_side: 'RIGHT',
-        diff_hunk: change.diff_hunk,
       });
     }
   }
