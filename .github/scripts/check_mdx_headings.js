@@ -31,46 +31,63 @@ function getFileDiff(filePath) {
 function extractHeadingChanges(diff) {
   const lines = diff.split('\n');
   const headingChanges = [];
-  let lineNumber = 0;
-  let inHunk = false;
-  let hunkStart = 0;
-  let hunkContent = [];
+  let position = 0;
+  let hunkStart = null;
+  let hunkHeader = '';
+  let hunkLines = [];
 
   for (const line of lines) {
     if (line.startsWith('@@')) {
-      if (inHunk) {
-        headingChanges.push({
-          line: hunkStart,
-          content: hunkContent.join('\n'),
-        });
+      if (hunkStart !== null) {
+        headingChanges.push(
+          ...processHunk(hunkHeader, hunkLines, hunkStart, position)
+        );
       }
-      inHunk = true;
-      const match = line.match(/@@ -\d+,\d+ \+(\d+),/);
-      hunkStart = match ? parseInt(match[1], 10) : 0;
-      lineNumber = hunkStart;
-      hunkContent = [line];
-    } else if (inHunk) {
-      hunkContent.push(line);
-      if (line.startsWith('-') && /^-#+\s/.test(line)) {
-        headingChanges.push({
-          line: lineNumber,
-          content: hunkContent.join('\n'),
-        });
-      }
-      if (!line.startsWith('-')) {
-        lineNumber++;
-      }
+      hunkHeader = line;
+      hunkLines = [];
+      hunkStart = position;
+    } else if (hunkStart !== null) {
+      hunkLines.push(line);
     }
+    position++;
   }
 
-  if (inHunk) {
-    headingChanges.push({
-      line: hunkStart,
-      content: hunkContent.join('\n'),
-    });
+  if (hunkStart !== null) {
+    headingChanges.push(
+      ...processHunk(hunkHeader, hunkLines, hunkStart, position)
+    );
   }
 
   return headingChanges;
+}
+
+function processHunk(hunkHeader, hunkLines, hunkStart, endPosition) {
+  const changes = [];
+  let lineNumber = parseInt(
+    hunkHeader.match(/@@ -\d+,\d+ \+(\d+)/)[1],
+    10
+  );
+
+  for (let i = 0; i < hunkLines.length; i++) {
+    const line = hunkLines[i];
+    if (line.startsWith('-') && /^-#+\s/.test(line)) {
+      const diffHunk = [
+        hunkHeader,
+        ...hunkLines.slice(0, Math.min(i + 4, hunkLines.length)),
+      ].join('\n');
+      changes.push({
+        position: hunkStart + i + 1,
+        line: lineNumber,
+        content: line,
+        diff_hunk: diffHunk,
+      });
+    }
+    if (!line.startsWith('-')) {
+      lineNumber++;
+    }
+  }
+
+  return changes;
 }
 
 async function createReviewWithComments(repo, prNumber, comments) {
@@ -146,10 +163,17 @@ async function main() {
     for (const change of headingChanges) {
       allComments.push({
         path: filePath,
-        position: change.line,
+        position: change.position,
         body: `Beep boop! Heading change detected!
 
-Please search the nextjs/src/app/kb/_content directory for any references to the anchor link for this content, to avoid broken anchor links.`,
+Please search the nextjs/src/app/kb/_content directory for any references to the anchor link for this content, to avoid broken anchor links.
+
+Changed heading: ${change.content}`,
+        line: change.line,
+        side: 'RIGHT',
+        start_line: change.line,
+        start_side: 'RIGHT',
+        diff_hunk: change.diff_hunk,
       });
     }
   }
