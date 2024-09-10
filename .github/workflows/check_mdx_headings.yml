@@ -26,9 +26,15 @@ jobs:
 
       - name: Install dependencies
         run: |
-          npm install @octokit/rest
+          npm init -y
+          npm install @octokit/rest node-fetch@2
+
+      - name: Update package.json for ES modules
+        run: |
+          node -e "const fs = require('fs'); const package = JSON.parse(fs.readFileSync('package.json')); package.type = 'module'; fs.writeFileSync('package.json', JSON.stringify(package, null, 2));"
 
       - name: Run MDX heading check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_NUMBER: ${{ github.event.number }}
         run: node .github/scripts/check_mdx_headings.js
