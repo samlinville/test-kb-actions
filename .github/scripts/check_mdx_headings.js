@@ -31,70 +31,50 @@ function getFileDiff(filePath) {
 function extractHeadingChanges(diff) {
   const lines = diff.split('\n');
   const headingChanges = [];
-  let position = 0;
-  let hunkStart = null;
-  let hunkHeader = '';
-  let hunkLines = [];
+  let lineNumber = 0;
+  let inHunk = false;
+  let hunkStart = 0;
 
   for (const line of lines) {
     if (line.startsWith('@@')) {
-      if (hunkStart !== null) {
-        headingChanges.push(
-          ...processHunk(hunkHeader, hunkLines, hunkStart, position)
-        );
+      inHunk = true;
+      const match = line.match(/@@ -\d+,\d+ \+(\d+),/);
+      hunkStart = match ? parseInt(match[1], 10) : 0;
+      lineNumber = hunkStart;
+    } else if (inHunk) {
+      if (line.startsWith('-') && /^-#+\s/.test(line)) {
+        headingChanges.push({ line: lineNumber, content: line });
       }
-      hunkHeader = line;
-      hunkLines = [];
-      hunkStart = position;
-    } else if (hunkStart !== null) {
-      hunkLines.push(line);
+      if (!line.startsWith('-')) {
+        lineNumber++;
+      }
     }
-    position++;
-  }
-
-  if (hunkStart !== null) {
-    headingChanges.push(
-      ...processHunk(hunkHeader, hunkLines, hunkStart, position)
-    );
   }
 
   return headingChanges;
 }
 
-function processHunk(hunkHeader, hunkLines, hunkStart, endPosition) {
-  const changes = [];
-  let lineNumber = parseInt(
-    hunkHeader.match(/@@ -\d+,\d+ \+(\d+)/)[1],
-    10
-  );
-
-  for (let i = 0; i < hunkLines.length; i++) {
-    const line = hunkLines[i];
-    if (line.startsWith('-') && /^-#+\s/.test(line)) {
-      const diffHunk = [
-        hunkHeader,
-        ...hunkLines.slice(0, Math.min(i + 4, hunkLines.length)),
-      ].join('\n');
-      changes.push({
-        position: hunkStart + i + 1,
-        line: lineNumber,
-        content: line,
-        diff_hunk: diffHunk,
-      });
-    }
-    if (!line.startsWith('-')) {
-      lineNumber++;
-    }
-  }
-
-  return changes;
+async function getExistingComments(repo, prNumber) {
+  const [owner, repoName] = repo.split('/');
+  const { data: comments } = await octokit.pulls.listReviewComments({
+    owner,
+    repo: repoName,
+    pull_number: prNumber,
+    per_page: 100,
+  });
+  return comments;
 }
 
-async function createReviewWithComments(repo, prNumber, comments) {
+async function createReviewWithComments(
+  repo,
+  prNumber,
+  newComments,
+  existingComments
+) {
   const [owner, repoName] = repo.split('/');
 
   console.log(
-    `Creating review for PR #${prNumber} with ${comments.length} comments`
+    `Creating review for PR #${prNumber} with ${newComments.length} comments`
   );
 
   try {
@@ -106,6 +86,26 @@ async function createReviewWithComments(repo, prNumber, comments) {
     });
     const commitSha = pullRequest.head.sha;
 
+    // Filter out comments that already exist
+    const uniqueComments = newComments.filter(
+      (newComment) =>
+        !existingComments.some(
+          (existingComment) =>
+            existingComment.path === newComment.path &&
+            existingComment.line === newComment.line &&
+            existingComment.body.includes(
+              'Beep boop! Heading change detected!'
+            )
+        )
+    );
+
+    if (uniqueComments.length === 0) {
+      console.log(
+        'No new comments to add. Skipping review creation.'
+      );
+      return;
+    }
+
     // Create a new review with comments
     const { data: review } = await octokit.pulls.createReview({
       owner,
@@ -113,7 +113,7 @@ async function createReviewWithComments(repo, prNumber, comments) {
       pull_number: prNumber,
       commit_id: commitSha,
       event: 'COMMENT',
-      comments: comments.map((comment) => ({
+      comments: uniqueComments.map((comment) => ({
         path: comment.path,
         line: comment.line,
         side: 'RIGHT',
@@ -154,6 +154,7 @@ async function main() {
   console.log(`Changed files: ${JSON.stringify(changedFiles)}`);
 
   const allComments = [];
+  const existingComments = await getExistingComments(repo, prNumber);
 
   for (const filePath of changedFiles) {
     console.log(`Processing file: ${filePath}`);
@@ -179,7 +180,12 @@ Changed heading: ${change.content}`,
   }
 
   if (allComments.length > 0) {
-    await createReviewWithComments(repo, prNumber, allComments);
+    await createReviewWithComments(
+      repo,
+      prNumber,
+      allComments,
+      existingComments
+    );
   } else {
     console.log(
       'No heading changes detected. No review comments created.'
