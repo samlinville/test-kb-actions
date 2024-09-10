@@ -45,7 +45,8 @@ function extractHeadingChanges(diff) {
         });
       }
       inHunk = true;
-      hunkStart = parseInt(line.match(/@@ -\d+,\d+ \+(\d+),/)[1], 10);
+      const match = line.match(/@@ -\d+,\d+ \+(\d+),/);
+      hunkStart = match ? parseInt(match[1], 10) : 0;
       lineNumber = hunkStart;
       hunkContent = [line];
     } else if (inHunk) {
@@ -72,40 +73,14 @@ function extractHeadingChanges(diff) {
   return headingChanges;
 }
 
-async function leaveComment(
-  repo,
-  prNumber,
-  filePath,
-  line,
-  diffHunk
-) {
+async function createReviewWithComments(repo, prNumber, comments) {
   const [owner, repoName] = repo.split('/');
 
   console.log(
-    `Attempting to leave comment on ${filePath}:${line} for PR #${prNumber}`
+    `Creating review for PR #${prNumber} with ${comments.length} comments`
   );
 
   try {
-    // Check for existing comments
-    const { data: existingComments } =
-      await octokit.pulls.listReviewComments({
-        owner,
-        repo: repoName,
-        pull_number: prNumber,
-      });
-
-    const commentExists = existingComments.some(
-      (comment) =>
-        comment.path === filePath &&
-        comment.line === line &&
-        comment.body.includes('Beep boop! Heading change detected!')
-    );
-
-    if (commentExists) {
-      console.log(`Comment already exists for ${filePath}:${line}`);
-      return;
-    }
-
     // Get the latest commit SHA
     const { data: pullRequest } = await octokit.pulls.get({
       owner,
@@ -114,28 +89,19 @@ async function leaveComment(
     });
     const commitSha = pullRequest.head.sha;
 
-    // Create a new comment with the updated format
-    const commentBody = `Beep boop! Heading change detected!
-
-Please search the nextjs/src/app/kb/_content directory for any references to the anchor link for this content, to avoid broken anchor links.`;
-
-    await octokit.pulls.createReviewComment({
+    // Create a new review with comments
+    const { data: review } = await octokit.pulls.createReview({
       owner,
       repo: repoName,
       pull_number: prNumber,
-      body: commentBody,
       commit_id: commitSha,
-      path: filePath,
-      line: line,
-      side: 'RIGHT',
-      start_line: line,
-      start_side: 'RIGHT',
-      diff_hunk: diffHunk,
+      event: 'COMMENT',
+      comments: comments,
     });
 
-    console.log(`Successfully left comment on ${filePath}:${line}`);
+    console.log(`Successfully created review with ID: ${review.id}`);
   } catch (error) {
-    console.error(`Error leaving comment: ${error.message}`);
+    console.error(`Error creating review: ${error.message}`);
     console.error(`Status: ${error.status}`);
     console.error(`Request URL: ${error.request?.url}`);
     console.error(
@@ -165,6 +131,8 @@ async function main() {
   const changedFiles = getChangedFiles();
   console.log(`Changed files: ${JSON.stringify(changedFiles)}`);
 
+  const allComments = [];
+
   for (const filePath of changedFiles) {
     console.log(`Processing file: ${filePath}`);
     const diff = getFileDiff(filePath);
@@ -174,15 +142,24 @@ async function main() {
         headingChanges
       )}`
     );
+
     for (const change of headingChanges) {
-      await leaveComment(
-        repo,
-        prNumber,
-        filePath,
-        change.line,
-        change.content
-      );
+      allComments.push({
+        path: filePath,
+        position: change.line,
+        body: `Beep boop! Heading change detected!
+
+Please search the nextjs/src/app/kb/_content directory for any references to the anchor link for this content, to avoid broken anchor links.`,
+      });
     }
+  }
+
+  if (allComments.length > 0) {
+    await createReviewWithComments(repo, prNumber, allComments);
+  } else {
+    console.log(
+      'No heading changes detected. No review comments created.'
+    );
   }
 
   console.log('MDX heading check completed.');
