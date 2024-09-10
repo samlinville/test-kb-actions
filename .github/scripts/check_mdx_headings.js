@@ -31,19 +31,54 @@ function getFileDiff(filePath) {
 function extractHeadingChanges(diff) {
   const lines = diff.split('\n');
   const headingChanges = [];
-  let currentLine = 0;
+  let lineNumber = 0;
+  let inHunk = false;
+  let hunkStart = 0;
+  let hunkContent = [];
 
   for (const line of lines) {
-    currentLine++;
-    if (line.startsWith('-') && /^-#+\s/.test(line)) {
-      headingChanges.push([currentLine, line]);
+    if (line.startsWith('@@')) {
+      if (inHunk) {
+        headingChanges.push({
+          line: hunkStart,
+          content: hunkContent.join('\n'),
+        });
+      }
+      inHunk = true;
+      hunkStart = parseInt(line.match(/@@ -\d+,\d+ \+(\d+),/)[1], 10);
+      lineNumber = hunkStart;
+      hunkContent = [line];
+    } else if (inHunk) {
+      hunkContent.push(line);
+      if (line.startsWith('-') && /^-#+\s/.test(line)) {
+        headingChanges.push({
+          line: lineNumber,
+          content: hunkContent.join('\n'),
+        });
+      }
+      if (!line.startsWith('-')) {
+        lineNumber++;
+      }
     }
+  }
+
+  if (inHunk) {
+    headingChanges.push({
+      line: hunkStart,
+      content: hunkContent.join('\n'),
+    });
   }
 
   return headingChanges;
 }
 
-async function leaveComment(repo, prNumber, filePath, line, content) {
+async function leaveComment(
+  repo,
+  prNumber,
+  filePath,
+  line,
+  diffHunk
+) {
   const [owner, repoName] = repo.split('/');
 
   console.log(
@@ -62,7 +97,7 @@ async function leaveComment(repo, prNumber, filePath, line, content) {
     const commentExists = existingComments.some(
       (comment) =>
         comment.path === filePath &&
-        comment.position === line &&
+        comment.line === line &&
         comment.body.includes('Beep boop! Heading change detected!')
     );
 
@@ -91,7 +126,11 @@ Please search the nextjs/src/app/kb/_content directory for any references to the
       body: commentBody,
       commit_id: commitSha,
       path: filePath,
-      position: line,
+      line: line,
+      side: 'RIGHT',
+      start_line: line,
+      start_side: 'RIGHT',
+      diff_hunk: diffHunk,
     });
 
     console.log(`Successfully left comment on ${filePath}:${line}`);
@@ -135,8 +174,14 @@ async function main() {
         headingChanges
       )}`
     );
-    for (const [line, content] of headingChanges) {
-      await leaveComment(repo, prNumber, filePath, line, content);
+    for (const change of headingChanges) {
+      await leaveComment(
+        repo,
+        prNumber,
+        filePath,
+        change.line,
+        change.content
+      );
     }
   }
 
