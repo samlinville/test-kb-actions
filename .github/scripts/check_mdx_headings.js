@@ -1,14 +1,7 @@
 import { execSync } from 'child_process';
-import { createRequire } from 'module';
+import { Octokit } from '@octokit/rest';
 
-const require = createRequire(import.meta.url);
-
-let Octokit;
-
-async function initOctokit() {
-  const { Octokit: OctokitClass } = await import('@octokit/rest');
-  Octokit = OctokitClass;
-}
+const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
 function getChangedFiles() {
   const result = execSync('git diff --name-only origin/main...HEAD')
@@ -44,14 +37,7 @@ function extractHeadingChanges(diff) {
   return headingChanges;
 }
 
-async function leaveComment(
-  octokit,
-  repo,
-  prNumber,
-  filePath,
-  line,
-  content
-) {
+async function leaveComment(repo, prNumber, filePath, line, content) {
   const [owner, repoName] = repo.split('/');
 
   // Check for existing comments
@@ -100,9 +86,6 @@ Please search the nextjs/src/app/kb/_content directory for any references to the
 }
 
 async function main() {
-  await initOctokit();
-  const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-
   const repo = process.env.GITHUB_REPOSITORY;
   const prNumber = parseInt(
     process.env.GITHUB_EVENT_PULL_REQUEST_NUMBER,
@@ -114,14 +97,7 @@ async function main() {
     const diff = getFileDiff(filePath);
     const headingChanges = extractHeadingChanges(diff);
     for (const [line, content] of headingChanges) {
-      await leaveComment(
-        octokit,
-        repo,
-        prNumber,
-        filePath,
-        line,
-        content
-      );
+      await leaveComment(repo, prNumber, filePath, line, content);
     }
   }
 }
