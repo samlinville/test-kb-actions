@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm init -y
-          npm install @octokit/rest
+          npm install @octokit/rest node-fetch@2
 
       - name: Update package.json for ES modules
         run: |

@@ -1,7 +1,13 @@
 import { execSync } from 'child_process';
 import { Octokit } from '@octokit/rest';
+import fetch from 'node-fetch';
 
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+const octokit = new Octokit({
+  auth: process.env.GITHUB_TOKEN,
+  request: {
+    fetch: fetch,
+  },
+});
 
 function getChangedFiles() {
   const result = execSync('git diff --name-only origin/main...HEAD')
