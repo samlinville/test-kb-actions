@@ -36,4 +36,5 @@ jobs:
       - name: Run MDX heading check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_NUMBER: ${{ github.event.number }}
         run: node .github/scripts/check_mdx_headings.js
